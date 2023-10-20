@@ -49,11 +49,15 @@ class LineFollower:
         start_time = time.time()
         end_time = time.time()
         print("Start following")
+        print("Native units: ", speed_native_units)
         #self._right_color_sensor.calibrate_white()
         #self._left_color_sensor.calibrate_white()
 
+        counter = 0
+
         while end_time - start_time <= follow_time:
-            error = self._left_color_sensor.reflected_light_intensity - self._right_color_sensor.reflected_light_intensity
+            error = self._left_color_sensor.reflected_light_intensity - self._right_color_sensor.reflected_light_intensity*0.96
+
             print("Left: ", self._left_color_sensor.reflected_light_intensity, "Right: ", self._right_color_sensor.reflected_light_intensity )
             integral = integral + error
             derivative = error - last_error
@@ -61,8 +65,8 @@ class LineFollower:
             turn_native_units = (kp * error) + (ki * integral) + (kd * derivative)
             print("Native units: ", turn_native_units)
 
-            left_speed = SpeedNativeUnits(speed_native_units - turn_native_units)
-            right_speed = SpeedNativeUnits(speed_native_units + turn_native_units)
+            left_speed = SpeedNativeUnits(speed_native_units + turn_native_units)
+            right_speed = SpeedNativeUnits(speed_native_units - turn_native_units)
             print("Left speed: ", left_speed, " ", "Right speed: ", right_speed)
 
             """# Have we lost the line?
@@ -78,14 +82,18 @@ class LineFollower:
             if sleep_time:
                 time.sleep(sleep_time)
 
+            if counter == 5:
+                integral = 0
+                counter = 0
+
             try:
-                pass
-                #self.tank.on(left_speed, right_speed)
+                self.tank.on(left_speed, right_speed)
             except SpeedInvalid as e:
                 self.tank.stop()
                 raise LineFollowErrorTooFast("The robot is moving too fast to follow the line")
 
             end_time = time.time()
+            counter += 1
 
         self.tank.stop()
         print("Following ended")
@@ -93,7 +101,15 @@ class LineFollower:
 
 if __name__ == "__main__":
     follower = LineFollower(OUTPUT_C, OUTPUT_A, INPUT_2, INPUT_1, "inversed", "inversed")
-    follower.follow_line_2_sensors(kp=1, ki=0.05, kd=0.05, speed=15, follow_time=4500, sleep_time=0.01)
+    follower.follow_line_2_sensors(kp=1, ki=0.1, kd=3.2, speed=15, follow_time=20, sleep_time=0.005)
+
+    """
+    Narazie najlepsze wartosci
+    kp = 0.2
+    ki = 0.05
+    kd = 3.2
+    counter = 3 lub 5
+    """
 
     """try:
         # Follow the line for 4500ms

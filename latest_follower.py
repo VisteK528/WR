@@ -5,7 +5,6 @@ from ev3dev2.sensor.lego import ColorSensor
 from ev3dev2.sensor import INPUT_1, INPUT_2
 from ev3dev2.motor import LineFollowErrorTooFast, LineFollowErrorLostLine
 
-
 """
 General information:
 Motors
@@ -16,75 +15,139 @@ Sensors
     - Right Color Sensor - ?
 
 """
+# TODO sprawdzić jak w literaturze nazywa się wartość wyjściowa reguatora
 
 
-class LineFollower:
-    def __init__(self, left_motor: str, right_motor: str, left_sensor: str, right_sensor: str,
-                 left_motor_polarity="inversed", right_motor_polarity="inversed"):
+class PID:
+    def __init__(self, kp: float, ki: float, kd: float,
+                 integral_reset_count: int):
+
+        # Coefficients
+        self._kp = kp
+        self._ki = ki
+        self._kd = kd
+
+        self._integral = 0
+        self._derivative = 0
+        self._last_error = 0
+
+        self._steering = 0
+
+        # Other variables
+        self._integral_counter = 0
+        self._integral_reset_count = integral_reset_count
+
+    def calculate_pid_steering(self, error):
+        # Calculate proportional, integral and derivative parts
+        self._integral += error
+        self._derivative = error - self._last_error
+        self._last_error = error
+
+        # Sum them together beforehand multiplying them with corresponding
+        # coefficients
+        self._steering = ((self._kp * error) + (self._ki * self._integral) +
+                          (self._kd * self._derivative))
+
+        # Increment integral counter
+        self._integral_counter += 1
+
+        # If integral counter is greater or equal to set integral rest count
+        # value then reset the integral part
+        if self._integral_counter >= self._integral_reset_count:
+            self._integral = 0
+            self._integral_counter = 0
+
+        return self._steering
+
+    def set_pid_coefficients(self, kp: float, ki: float, kd: float):
+        self._kp = kp
+        self._ki = ki
+        self._kd = kd
+
+    def get_steering_command(self):
+        return self._steering
+
+
+class LineFollower2:
+    def __init__(self, left_motor: str, right_motor: str, left_sensor: str,
+                 right_sensor: str, pid_controller: PID,
+                 left_motor_polarity_inversed=False,
+                 right_motor_polarity_inversed=False,
+                 display_logs=True):
 
         # Init tank unit
-        self.tank = MoveTank(left_motor_port=left_motor, right_motor_port=right_motor)
+        self.tank = MoveTank(left_motor_port=left_motor,
+                             right_motor_port=right_motor)
 
         # Set polarity of the motors
-        self.tank.left_motor.polarity = left_motor_polarity
-        self.tank.right_motor.polarity = right_motor_polarity
+        if left_motor_polarity_inversed:
+            self.tank.left_motor.polarity = "inversed"
+
+        if right_motor_polarity_inversed:
+            self.tank.right_motor.polarity = "inversed"
 
         # Init color sensors
-        self._left_color_sensor = ColorSensor(left_sensor)
-        self._right_color_sensor = ColorSensor(right_sensor)
-        print("Configuration complete")
+        self._l_cs = ColorSensor(left_sensor)
+        self._r_cs = ColorSensor(right_sensor)
 
-    def calculate_pid_steering(self, kp: float, ki: float, kd: float):
-        pass
+        self._reflected_light_percentage = {"left": None, "right": None}
+
+        # Assign PID controller object to variable
+        self._pid = pid_controller
+
+        self._display_logs = display_logs
+        if self._display_logs:
+            print("Configuration complete")
+
+    def _generate_error(self, l_cs_tol: float,
+                        r_cs_tol: float):
+        self._reflected_light_percentage = {
+            "left": self._l_cs.reflected_light_intensity,
+            "right": self._r_cs.reflected_light_intensity
+        }
+
+        error = (self._reflected_light_percentage["left"]*l_cs_tol
+                 - self._reflected_light_percentage["right"]*r_cs_tol)
+
+        return error
 
 
-    def follow_line_2_sensors(self, kp, ki, kd, speed, follow_time, target_light_intensity=None, follow_left_edge=True, white=60,
-                              off_line_count_max=20, sleep_time=0.01):
-        integral = 0.0
-        last_error = 0.0
-        derivative = 0.0
-        off_line_count = 0
+    def follow_line_for_time(self, speed, follow_time, sleep_time=0.01):
         speed = speed_to_speedvalue(speed)
         speed_native_units = speed.to_native_units(self.tank.left_motor)
-        start_time = time.time()
-        end_time = time.time()
-        print("Start following")
-        print("Native units: ", speed_native_units)
-        #self._right_color_sensor.calibrate_white()
-        #self._left_color_sensor.calibrate_white()
 
-        counter = 0
+        start_time = end_time = time.time()
+
+        if self._display_logs:
+            print("Following started!")
+
+        # Optional sensor calibration
+        # self._right_color_sensor.calibrate_white()
+        # self._left_color_sensor.calibrate_white()
+
+        left_color = None
+        right_color = None
 
         while end_time - start_time <= follow_time:
-            error = self._left_color_sensor.reflected_light_intensity - self._right_color_sensor.reflected_light_intensity*0.96
+            error = self._generate_error(l_cs_tol=1,
+                                         r_cs_tol=0.96)
+            turn_native_units = self._pid.calculate_pid_steering(error)
+            log_message = ""
 
-            print("Left: ", self._left_color_sensor.reflected_light_intensity, "Right: ", self._right_color_sensor.reflected_light_intensity )
-            integral = integral + error
-            derivative = error - last_error
-            last_error = error
-            turn_native_units = (kp * error) + (ki * integral) + (kd * derivative)
-            print("Native units: ", turn_native_units)
+            log_message += "Left: " + str(self._reflected_light_percentage["left"]) + " " + "Right: " + str(self._reflected_light_percentage["right"]) + "\t"
+            log_message += "Turn: " + str(turn_native_units) + "\t"
 
-            left_speed = SpeedNativeUnits(speed_native_units + turn_native_units)
-            right_speed = SpeedNativeUnits(speed_native_units - turn_native_units)
-            print("Left speed: ", left_speed, " ", "Right speed: ", right_speed)
+            # Calculate motors speed
+            left_speed = SpeedNativeUnits(
+                speed_native_units + turn_native_units)
+            right_speed = SpeedNativeUnits(
+                speed_native_units - turn_native_units)
 
-            """# Have we lost the line?
-            if self._left_color_sensor.reflected_light_intensity >= white and self._right_color_sensor.reflected_light_intensity >= white:
-                off_line_count += 1
-
-                if off_line_count >= off_line_count_max:
-                    self.tank.stop()
-                    raise LineFollowErrorLostLine("we lost the line")
-            else:
-                off_line_count = 0"""
+            log_message += "LSpeed: " + str(left_speed) + " "
+            log_message += "RSpeed: " + str(right_speed)
 
             if sleep_time:
                 time.sleep(sleep_time)
-
-            if counter == 5:
-                integral = 0
-                counter = 0
 
             try:
                 self.tank.on(left_speed, right_speed)
@@ -93,32 +156,94 @@ class LineFollower:
                 raise LineFollowErrorTooFast("The robot is moving too fast to follow the line")
 
             end_time = time.time()
-            counter += 1
+
+            # Optional color checking
+            # left_color = self._l_cs.color_name
+            # right_color = self._r_cs.color_name
+
+            print(log_message)
 
         self.tank.stop()
-        print("Following ended")
+
+        if self._display_logs:
+            print("Following ended!")
+
+
+    def follow_until_color(self, speed, color: str, stop_time=120, sleep_time=0.01):
+        speed = speed_to_speedvalue(speed)
+        speed_native_units = speed.to_native_units(self.tank.left_motor)
+
+        start_time = end_time = time.time()
+
+        if self._display_logs:
+            print("Following started!")
+
+        # Optional sensor calibration
+        # self._right_color_sensor.calibrate_white()
+        # self._left_color_sensor.calibrate_white()
+
+        left_color = None
+        right_color = None
+
+        while end_time - start_time <= stop_time and not (left_color == right_color == color):
+
+            error = self._generate_error(l_cs_tol=1,
+                                         r_cs_tol=0.96)
+            turn_native_units = self._pid.calculate_pid_steering(error)
+            log_message = ""
+
+            log_message += "Left: " + str(self._reflected_light_percentage[
+                                              "left"]) + " " + "Right: " + str(
+                self._reflected_light_percentage["right"]) + "\t"
+            log_message += "Turn: " + str(turn_native_units) + "\t"
+
+            # Calculate motors speed
+            left_speed = SpeedNativeUnits(
+                speed_native_units + turn_native_units)
+            right_speed = SpeedNativeUnits(
+                speed_native_units - turn_native_units)
+
+            log_message += "LSpeed: " + str(left_speed) + " "
+            log_message += "RSpeed: " + str(right_speed)
+
+            if sleep_time:
+                time.sleep(sleep_time)
+
+            try:
+                self.tank.on(left_speed, right_speed)
+            except SpeedInvalid as e:
+                self.tank.stop()
+                raise LineFollowErrorTooFast(
+                    "The robot is moving too fast to follow the line")
+
+            end_time = time.time()
+            left_color = self._l_cs.color_name
+            right_color = self._r_cs.color_name
+            print(log_message)
+
+        self.tank.stop()
+
+        if self._display_logs:
+            print("Following ended!")
 
 
 if __name__ == "__main__":
-    follower = LineFollower(OUTPUT_C, OUTPUT_A, INPUT_2, INPUT_1, "inversed", "inversed")
-    follower.follow_line_2_sensors(kp=1, ki=0.1, kd=3.2, speed=15, follow_time=20, sleep_time=0.005)
+    regulator = PID(kp=0.85, ki=0.01, kd=3.2, integral_reset_count=5)
+    follower = LineFollower2(OUTPUT_C, OUTPUT_A, INPUT_2, INPUT_1, regulator,
+                             True, True)
+    follower.follow_line_for_time(speed=15, follow_time=20, sleep_time=0.005)
 
     """
-    Narazie najlepsze wartosci
+    Na razie najlepsze wartosci
+    1 miejsce
+    kp = 0.85
+    ki = 0.05
+    kd = 3.2
+    counter = 3 lub 5
+    
+    2 miejsce
     kp = 0.2
     ki = 0.05
     kd = 3.2
     counter = 3 lub 5
     """
-
-    """try:
-        # Follow the line for 4500ms
-        follower.tank.follow_line(
-            kp=11.3, ki=0.05, kd=3.2,
-            speed=SpeedPercent(30),
-            follow_for=follow_for_ms,
-            follow_left_edge=True,
-            ms=4500
-        )
-    except LineFollowErrorTooFast:
-        follower.tank.stop()"""

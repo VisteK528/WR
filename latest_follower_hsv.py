@@ -1,6 +1,7 @@
 import time
 
-from ev3dev2.motor import OUTPUT_A, OUTPUT_C, MoveTank, SpeedPercent, follow_for_ms, speed_to_speedvalue, SpeedInvalid, SpeedNativeUnits
+from ev3dev2.motor import OUTPUT_A, OUTPUT_C, MoveTank, SpeedPercent, \
+    follow_for_ms, speed_to_speedvalue, SpeedInvalid, SpeedNativeUnits
 from ev3dev2.sensor.lego import ColorSensor
 from ev3dev2.sensor import INPUT_1, INPUT_2
 from ev3dev2.motor import LineFollowErrorTooFast, LineFollowErrorLostLine
@@ -53,13 +54,13 @@ def rgb_to_hsv(r: int, g: int, b: int):
     value = c_max
     return hue, sat, value
 
+
 # TODO sprawdzić jak w literaturze nazywa się wartość wyjściowa reguatora
 
 
 class PID:
     def __init__(self, kp: float, ki: float, kd: float,
                  integral_reset_count: int):
-
         # Coefficients
         self._kp = kp
         self._ki = ki
@@ -128,6 +129,11 @@ class LineFollower2:
         self._l_cs = ColorSensor(left_sensor)
         self._r_cs = ColorSensor(right_sensor)
 
+        self._left_color = None
+        self._right_color = None
+        self._l_hsv = (None, None, None)
+        self._r_hsv = (None, None, None)
+
         self._reflected_light_percentage = {"left": None, "right": None}
 
         # Assign PID controller object to variable
@@ -137,41 +143,48 @@ class LineFollower2:
         if self._display_logs:
             print("Configuration complete")
 
-    def get_color(self):
-        colors = ["red", "blue", "white", "black", "green", "yellow"]
+    def determine_color(self, h: int, s: int, v: int):
+        # Hue ranges for red, green and blue
+        # red from 320 to 50
+        # green from 75 to 170
+        # blue from 180 to 280
 
-        left_color = None
-        right_color = None
+        sat_threshold = 50              # in percent
+        if s < sat_threshold:
+            return None
+        else:
+            if h >= 320 or h <= 50:
+                return "red"
+            elif 75 <= h <= 170:
+                return "green"
+            elif 180 <= h <= 280:
+                return "blue"
+            else:
+                return "unknown"
 
-        left_rgb = self._l_cs.rgb
-        right_rgb = self._r_cs.rgb
+    def updateSensor(self):
+        self._l_hsv = self._l_cs.hsv
+        self._r_hsv = self._r_cs.hsv
 
-        return left_color, right_color
+        self._left_color = self.determine_color(*self._l_hsv)
+        self._right_color = self.determine_color(*self._r_hsv)
 
-    def _convert_rgb_to_grayscale(self, r: int, g: int, b: int):
-        # 0.30*R + 0.59*G + 0.11*B
-        red_coefficient = 0.3
-        green_coefficient = 0.59
-        blue_coefficient = 0.11
-
-        grayscale = red_coefficient*r + green_coefficient*g + blue_coefficient*b
-
-        # scale grayscale value from range 0 to 255 to range from 0 to 100
-        scaled_grayscale = map(grayscale, 0, 255, 0, 100)
-        return scaled_grayscale
+        return self._left_color, self._right_color
 
     def _generate_error(self, l_cs_tol: float,
                         r_cs_tol: float):
-        self._reflected_light_percentage = {
-            "left": self._l_cs.reflected_light_intensity,
-            "right": self._r_cs.reflected_light_intensity
-        }
+        if self._l_hsv[2] is None or self._r_hsv[2] is None:
+            return None
+        else:
+            self._reflected_light_percentage = {
+                "left": self._l_hsv[2],
+                "right": self._r_hsv[2]
+            }
 
-        error = (self._reflected_light_percentage["left"]*l_cs_tol
-                 - self._reflected_light_percentage["right"]*r_cs_tol)
+            error = (self._reflected_light_percentage["left"] * l_cs_tol
+                     - self._reflected_light_percentage["right"] * r_cs_tol)
 
-        return error
-
+            return error
 
     def follow_line_for_time(self, speed, follow_time, sleep_time=0.01):
         speed = speed_to_speedvalue(speed)
@@ -192,59 +205,10 @@ class LineFollower2:
         while end_time - start_time <= follow_time:
             error = self._generate_error(l_cs_tol=1,
                                          r_cs_tol=0.96)
-            turn_native_units = self._pid.calculate_pid_steering(error)
-            log_message = ""
 
-            log_message += "Left: " + str(self._reflected_light_percentage["left"]) + " " + "Right: " + str(self._reflected_light_percentage["right"]) + "\t"
-            log_message += "Turn: " + str(turn_native_units) + "\t"
+            if error is None:
+                raise Exception("Invalid error")
 
-            # Calculate motors speed
-            left_speed = SpeedNativeUnits(
-                speed_native_units + turn_native_units)
-            right_speed = SpeedNativeUnits(
-                speed_native_units - turn_native_units)
-
-            log_message += "LSpeed: " + str(left_speed) + " "
-            log_message += "RSpeed: " + str(right_speed)
-
-            if sleep_time:
-                time.sleep(sleep_time)
-
-            try:
-                self.tank.on(left_speed, right_speed)
-            except SpeedInvalid as e:
-                self.tank.stop()
-                raise LineFollowErrorTooFast("The robot is moving too fast to follow the line")
-
-            end_time = time.time()
-            print(log_message)
-
-        self.tank.stop()
-
-        if self._display_logs:
-            print("Following ended!")
-
-
-    def follow_until_color(self, speed, color: str, stop_time=120, sleep_time=0.01):
-        speed = speed_to_speedvalue(speed)
-        speed_native_units = speed.to_native_units(self.tank.left_motor)
-
-        start_time = end_time = time.time()
-
-        if self._display_logs:
-            print("Following started!")
-
-        # Optional sensor calibration
-        # self._right_color_sensor.calibrate_white()
-        # self._left_color_sensor.calibrate_white()
-
-        left_color = None
-        right_color = None
-
-        while end_time - start_time <= stop_time and not (left_color == right_color == color):
-
-            error = self._generate_error(l_cs_tol=1,
-                                         r_cs_tol=0.96)
             turn_native_units = self._pid.calculate_pid_steering(error)
             log_message = ""
 
@@ -273,14 +237,24 @@ class LineFollower2:
                     "The robot is moving too fast to follow the line")
 
             end_time = time.time()
-            left_color = self._l_cs.color_name
-            right_color = self._r_cs.color_name
             print(log_message)
 
         self.tank.stop()
 
         if self._display_logs:
             print("Following ended!")
+
+    def run(self, speed, sleep_time=0.01):
+        speed = speed_to_speedvalue(speed)
+        speed_native_units = speed.to_native_units(self.tank.left_motor)
+
+        while True:
+            # Update color sensor readings
+            self.updateSensor()
+
+            if self._left_color in ["uknown", None] and self._right_color in ["unknown", None]:
+                # Line following for next step
+                pass
 
 
 if __name__ == "__main__":
@@ -296,7 +270,7 @@ if __name__ == "__main__":
     ki = 0.05
     kd = 3.2
     counter = 3 lub 5
-    
+
     2 miejsce
     kp = 0.2
     ki = 0.05

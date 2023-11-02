@@ -38,11 +38,7 @@ class PID:
     def calculate_pid_steering(self, error):
         # Calculate proportional, integral and derivative parts
         self._integral += error
-        if error * self._last_error > 0:
-            self._derivative = error - self._last_error
-        else:
-            self._derivative = error + self._last_error
-
+        self._derivative = error - self._last_error
         self._last_error = error
 
         # Sum them together beforehand multiplying them with corresponding
@@ -219,7 +215,7 @@ if __name__ == "__main__":
     ki = 0.05
     kd = 3.2
     counter = 3 lub 5
-    
+
     2 miejsce
     kp = 0.2
     ki = 0.05
@@ -228,8 +224,8 @@ if __name__ == "__main__":
     """
     """
     Informacje warte uwagi:
-    1. Zwrócić uwagę na naładowanie akumulatorów - niskie napięcie może wpływać na działanie czujników 
+    1. Zwrócić uwagę na naładowanie akumulatorów - niskie napięcie może wpływać na działanie czujników
     2. Rozpocząć kalibrację od Kp, Ki i Kd zainicjalizowane jako 0
     3. Przy zwiększaniu Kd, zmniejszać lekko Kp
-    
+
     """

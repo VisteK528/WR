@@ -1,6 +1,6 @@
 import time
 
-from ev3dev2.motor import OUTPUT_A, OUTPUT_C, MoveTank, SpeedPercent, \
+from ev3dev2.motor import OUTPUT_B, OUTPUT_C, MoveTank, SpeedPercent, \
     follow_for_ms, speed_to_speedvalue, SpeedInvalid, SpeedNativeUnits
 from ev3dev2.sensor.lego import ColorSensor
 from ev3dev2.sensor import INPUT_1, INPUT_2
@@ -120,10 +120,10 @@ class LineFollower2:
 
         # Set polarity of the motors
         if left_motor_polarity_inversed:
-            self.tank.left_motor.polarity = "inversed"
+            self.tank.left_motor.polarity = "normal"
 
         if right_motor_polarity_inversed:
-            self.tank.right_motor.polarity = "inversed"
+            self.tank.right_motor.polarity = "normal"
 
         # Init color sensors
         self._l_cs = ColorSensor(left_sensor)
@@ -145,26 +145,30 @@ class LineFollower2:
 
     def determine_color(self, h: int, s: int, v: int):
         # Hue ranges for red, green and blue
-        # red from 320 to 50
-        # green from 75 to 170
-        # blue from 180 to 280
+        # red from 180 to 200
+        # green from 115 to 145
+        # blue from 90 to 120
 
-        sat_threshold = 50  # in percent
+        sat_threshold = 0.5  # in percent
+
         if s < sat_threshold:
             return None
         else:
-            if h >= 320 or h <= 50:
+            if 180 <= h <= 200:
                 return "red"
-            elif 75 <= h <= 170:
+            elif 115 <= h <= 145:
                 return "green"
-            elif 180 <= h <= 280:
+            elif 90 <= h <= 120:
                 return "blue"
             else:
                 return "unknown"
 
     def updateSensor(self):
-        self._l_hsv = self._l_cs.hsv
-        self._r_hsv = self._r_cs.hsv
+        lv, ls, lh = self._l_cs.hsv
+        rv, rs, rh = self._r_cs.hsv
+
+        self._l_hsv = (lh, ls, lv)
+        self._r_hsv = (rh, rs, rv)
 
         self._left_color = self.determine_color(*self._l_hsv)
         self._right_color = self.determine_color(*self._r_hsv)
@@ -174,14 +178,14 @@ class LineFollower2:
     def check_colors_loop(self):
         while True:
             self.updateSensor()
-            message = "LH: " + str(self._l_hsv[0]) + " " + "LS: " + str(
-                self._l_hsv[1]) + " " + "LV: " + str(self._l_hsv[2])
+            message = "LH: " + str(self._l_hsv[0]).format(".3f") + " " + "LS: " + str(
+                self._l_hsv[1]).format(".3f") + " " + "LV: " + str(self._l_hsv[2]).format(".3f")
             message += "\t"
-            message += "RH: " + str(self._r_hsv[0]) + " " + "RS: " + str(
-                self._r_hsv[1]) + " " + "RV: " + str(self._r_hsv[2])
+            message += "RH: " + str(self._r_hsv[0]).format(".3f") + " " + "RS: " + str(
+                self._r_hsv[1]).format(".3f") + " " + "RV: " + str(self._r_hsv[2]).format(".3f")
             message += "\t"
             if self._left_color is not None:
-                message += "LColor: " + self._left_color
+                message += "LColor: " + self._left_color + " "
             if self._right_color is not None:
                 message += "RColor: " + self._right_color
             print(message)
@@ -193,8 +197,8 @@ class LineFollower2:
             return None
         else:
             self._reflected_light_percentage = {
-                "left": self._l_hsv[2],
-                "right": self._r_hsv[2]
+                "left": self._l_hsv[2]*100,
+                "right": self._r_hsv[2]*100
             }
 
             error = (self._reflected_light_percentage["left"] * l_cs_tol
@@ -215,12 +219,14 @@ class LineFollower2:
         # self._right_color_sensor.calibrate_white()
         # self._left_color_sensor.calibrate_white()
 
-        left_color = None
-        right_color = None
+        self._l_cs.mode = ColorSensor.MODES[2]
+        self._r_cs.mode = ColorSensor.MODES[2]
 
         while end_time - start_time <= follow_time:
+            self.updateSensor()
+
             error = self._generate_error(l_cs_tol=1,
-                                         r_cs_tol=0.96)
+                                         r_cs_tol=1)
 
             if error is None:
                 raise Exception("Invalid error")
@@ -235,9 +241,9 @@ class LineFollower2:
 
             # Calculate motors speed
             left_speed = SpeedNativeUnits(
-                speed_native_units + turn_native_units)
-            right_speed = SpeedNativeUnits(
                 speed_native_units - turn_native_units)
+            right_speed = SpeedNativeUnits(
+                speed_native_units + turn_native_units)
 
             log_message += "LSpeed: " + str(left_speed) + " "
             log_message += "RSpeed: " + str(right_speed)
@@ -275,10 +281,10 @@ class LineFollower2:
 
 
 if __name__ == "__main__":
-    regulator = PID(kp=0.85, ki=0.01, kd=3.2, integral_reset_count=5)
-    follower = LineFollower2(OUTPUT_C, OUTPUT_A, INPUT_2, INPUT_1, regulator,
+    regulator = PID(kp=4.5, ki=0.0, kd=0, integral_reset_count=5)
+    follower = LineFollower2(OUTPUT_C, OUTPUT_B, INPUT_2, INPUT_1, regulator,
                              True, True)
-    follower.check_colors_loop()
+    follower.follow_line_for_time(15, 30, 0.002)
 
 
 

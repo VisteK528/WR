@@ -1,5 +1,6 @@
 import time
-from ev3dev2.motor import OUTPUT_B, OUTPUT_C, MoveTank, speed_to_speedvalue, SpeedInvalid, SpeedNativeUnits
+from ev3dev2.motor import OUTPUT_B, OUTPUT_C, MoveSteering, speed_to_speedvalue, \
+    SpeedInvalid, SpeedNativeUnits, SpeedPercent
 from ev3dev2.sensor.lego import ColorSensor
 from ev3dev2.sensor import INPUT_1, INPUT_2
 from ev3dev2.motor import LineFollowErrorTooFast
@@ -78,7 +79,7 @@ class LineFollower2:
                  display_logs=True):
 
         # Init tank unit
-        self.tank = MoveTank(left_motor_port=left_motor,
+        self.tank = MoveSteering(left_motor_port=left_motor,
                              right_motor_port=right_motor)
 
         # Set polarity of the motors
@@ -112,89 +113,33 @@ class LineFollower2:
             "right": self._r_cs.reflected_light_intensity
         }
 
-        error = (self._reflected_light_percentage["left"]*l_cs_tol
-                 - self._reflected_light_percentage["right"]*r_cs_tol)
+        error = (self._reflected_light_percentage["left"] * l_cs_tol
+                 - self._reflected_light_percentage["right"] * r_cs_tol)
 
         return error
 
     def follow_line_for_time(self, speed, follow_time, sleep_time=0.01,
                              l_cs_tol=1., r_cs_tol=1.):
-        speed = speed_to_speedvalue(speed)
-        speed_native_units = speed.to_native_units(self.tank.left_motor)
 
         start_time = end_time = time.time()
 
         if self._display_logs:
             print("Following started!")
 
-        # Optional sensor calibration
-        # self._right_color_sensor.calibrate_white()
-        # self._left_color_sensor.calibrate_white()
-
-        while end_time - start_time <= follow_time:
-            error = self._generate_error(l_cs_tol=l_cs_tol,
-                                         r_cs_tol=r_cs_tol)
-            turn_native_units = self._pid.calculate_pid_steering(error)
-            log_message = ""
-
-            log_message += "Left: " + str(self._reflected_light_percentage["left"]) + " " + "Right: " + str(self._reflected_light_percentage["right"]) + "\t"
-            log_message += "Turn: " + str(turn_native_units) + "\t"
-
-            # Calculate motors speed
-            left_speed = SpeedNativeUnits(speed_native_units + turn_native_units)
-            right_speed = SpeedNativeUnits(speed_native_units - turn_native_units)
-
-            log_message += "LSpeed: " + str(left_speed) + " "
-            log_message += "RSpeed: " + str(right_speed)
-
-            if sleep_time:
-                time.sleep(sleep_time)
-
-            try:
-                self.tank.on(left_speed, right_speed)
-            except SpeedInvalid as e:
-                self.tank.stop()
-                raise LineFollowErrorTooFast("The robot is moving too fast to follow the line")
-
-            end_time = time.time()
-            print(log_message)
-
-        self.tank.stop()
-
-        if self._display_logs:
-            print("Following ended!")
-
-    def follow_line_for_time_raw(self, speed, follow_time, sleep_time=0.01,
-                                 l_cs_tol=1., r_cs_tol=1.):
-        speed = speed_to_speedvalue(speed)
-        speed_native_units = speed.to_native_units(self.tank.left_motor)
-
-        start_time = end_time = time.time()
-
-        if self._display_logs:
-            print("Following started!")
-
-        # Optional sensor calibration
-        # self._right_color_sensor.calibrate_white()
-        # self._left_color_sensor.calibrate_white()
-
         while end_time - start_time <= follow_time:
             error = self._generate_error(l_cs_tol=l_cs_tol,
                                          r_cs_tol=r_cs_tol)
             turn_native_units = self._pid.calculate_pid_steering(error)
 
-            # Calculate motors speed
-            left_speed = SpeedNativeUnits(speed_native_units + turn_native_units)
-            right_speed = SpeedNativeUnits(speed_native_units - turn_native_units)
-
             if sleep_time:
                 time.sleep(sleep_time)
 
             try:
-                self.tank.on(left_speed, right_speed)
+                self.tank.on(turn_native_units, SpeedPercent(speed))
             except SpeedInvalid as e:
                 self.tank.stop()
-                raise LineFollowErrorTooFast("The robot is moving too fast to follow the line")
+                raise LineFollowErrorTooFast(
+                    "The robot is moving too fast to follow the line")
 
             end_time = time.time()
 
@@ -213,23 +158,9 @@ if __name__ == "__main__":
                                   l_cs_tol=1, r_cs_tol=0.9)
 
     """
-    Na razie najlepsze wartosci
-    1 miejsce
-    kp = 0.85
-    ki = 0.05
-    kd = 3.2
-    counter = 3 lub 5
-    
-    2 miejsce
-    kp = 0.2
-    ki = 0.05
-    kd = 3.2
-    counter = 3 lub 5
-    """
-    """
     Informacje warte uwagi:
     1. Zwrócić uwagę na naładowanie akumulatorów - niskie napięcie może wpływać na działanie czujników 
     2. Rozpocząć kalibrację od Kp, Ki i Kd zainicjalizowane jako 0
     3. Przy zwiększaniu Kd, zmniejszać lekko Kp
-    
+
     """

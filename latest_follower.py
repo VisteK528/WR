@@ -205,27 +205,13 @@ if __name__ == "__main__":
     follower = LineFollower2(OUTPUT_C, OUTPUT_B, INPUT_2, INPUT_1, regulator,
                              False, False)
 
-    follower.follow_line_for_time_raw(speed=10, follow_time=120, sleep_time=0.001,
+    follower.follow_line_for_time_raw(speed=10, follow_time=20, sleep_time=0.001,
                                   l_cs_tol=1, r_cs_tol=0.9)
 
-    """
-    Na razie najlepsze wartosci
-    1 miejsce
-    kp = 0.85
-    ki = 0.05
-    kd = 3.2
-    counter = 3 lub 5
 
-    2 miejsce
-    kp = 0.2
-    ki = 0.05
-    kd = 3.2
-    counter = 3 lub 5
-    """
-    """
-    Informacje warte uwagi:
-    1. Zwrócić uwagę na naładowanie akumulatorów - niskie napięcie może wpływać na działanie czujników
-    2. Rozpocząć kalibrację od Kp, Ki i Kd zainicjalizowane jako 0
-    3. Przy zwiększaniu Kd, zmniejszać lekko Kp
+"""
+test 1:
+kp=4, ki=0, kd=0, integral_reset_count=5, speed=10, follow_time=120, sleep_time=0.001, l_cs_tol=1, r_cs_tol=0.9
 
-    """
+test 2: 
+"""

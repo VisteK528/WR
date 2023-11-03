@@ -201,11 +201,11 @@ class LineFollower2:
 
 
 if __name__ == "__main__":
-    regulator = PID(kp=4, ki=0, kd=0, integral_reset_count=5)
+    regulator = PID(kp=3.8, ki=0, kd=0.2, integral_reset_count=5)
     follower = LineFollower2(OUTPUT_C, OUTPUT_B, INPUT_2, INPUT_1, regulator,
                              False, False)
 
-    follower.follow_line_for_time_raw(speed=10, follow_time=20, sleep_time=0.001,
+    follower.follow_line_for_time_raw(speed=10, follow_time=120, sleep_time=0.001,
                                   l_cs_tol=1, r_cs_tol=0.9)
 
 
@@ -214,4 +214,5 @@ test 1:
 kp=4, ki=0, kd=0, integral_reset_count=5, speed=10, follow_time=120, sleep_time=0.001, l_cs_tol=1, r_cs_tol=0.9
 
 test 2: 
+kp=3.8, ki=0, kd=0.2, integral_reset_count=5, speed=10, follow_time=120, sleep_time=0.001, l_cs_tol=1, r_cs_tol=0.9
 """

@@ -205,8 +205,11 @@ if __name__ == "__main__":
     follower = LineFollower2(OUTPUT_C, OUTPUT_B, INPUT_2, INPUT_1, regulator,
                              False, False)
 
-    follower.follow_line_for_time_raw(speed=10, follow_time=120, sleep_time=0.001,
-                                  l_cs_tol=1, r_cs_tol=0.9)
+    try:
+        follower.follow_line_for_time_raw(speed=10, follow_time=120, sleep_time=0.001,
+                                          l_cs_tol=1, r_cs_tol=0.9)
+    except KeyboardInterrupt:
+        follower.tank.stop()
 
 
 """

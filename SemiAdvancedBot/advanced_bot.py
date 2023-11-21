@@ -1,10 +1,10 @@
-from ev3dev2.motor import OUTPUT_B, OUTPUT_C, MoveTank, speed_to_speedvalue, SpeedInvalid, SpeedNativeUnits, MediumMotor
+from ev3dev2.motor import MoveTank, speed_to_speedvalue, SpeedInvalid, SpeedNativeUnits, MediumMotor, SpeedPercent
 from ev3dev2.sensor.lego import ColorSensor, TouchSensor
-from ev3dev2.sensor import INPUT_1, INPUT_2
 from ev3dev2.motor import LineFollowErrorTooFast
 from pid import PID
 from time import sleep, time
 from my_utils import my_map, States, TurnDirection, Colors
+from ev3dev2.button import Button
 
 """
 States:
@@ -103,6 +103,7 @@ class AdvancedBot:
         self._r_rgb = [min(int((color * 255) / max_color), 255) for color,
                        max_color in zip(raw_right, self._max_r_cs)]
 
+
         # TODO Check the ranges of the colors in the spectrum and assign
         #      readings for self._lcolor and self._r_color using Colors class
 
@@ -183,11 +184,18 @@ class AdvancedBot:
         start_time = end_time = time()
         while end_time - start_time <= follow_time:
 
+            self.update_colors()
+
+            if self._r_color == Colors.GREEN:
+                break
+            self.calculate_grayscale()
+
             self.follow_line_step(l_cs_tol, r_cs_tol)
             sleep(sleep_time)
 
             end_time = time()
 
+        self.tank.on_for_seconds(SpeedPercent(10), SpeedPercent(-10), 1.36)
         self.tank.stop()
         print("Following ended!")
 
@@ -217,7 +225,7 @@ class AdvancedBot:
 
                     else:
                         self._state = States.FOLLOW_THE_LINE
-                        self.follow_line_step(l_tol=1, r_tol=0.9)
+                        self.follow_line_step(l_tol=1, r_tol=1)
                 elif self._state == States.TURN_TO_THE_POINT:
                     self._turn_to_the_point()
 

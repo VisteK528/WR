@@ -353,9 +353,11 @@ class AdvancedBot:
     
     def _load_the_package(self):
         self._medium_motor.on_for_degrees(SpeedPercent(10), -90)
+        self._loaded = True
     
     def _unload_the_package(self):
         self._medium_motor.on_for_degrees(SpeedPercent(10), 90)
+        self._loaded = False
 
     def follow_line_step(self, l_tol: float, r_tol: float):
 

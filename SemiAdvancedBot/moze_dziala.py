@@ -17,7 +17,7 @@ S6 Unload the package
 S7 Terminal State
 """
 
-FULL_TURN_TIME = 5.45
+FULL_TURN_TIME = 5.445
 
 
 def rgb_to_hsv(r: int, g: int, b: int):
@@ -154,8 +154,8 @@ class AdvancedBot:
         # Red       ->  (232,  44,  32)
         # Blue      ->  ( 48, 102, 164)
 
-        saturation_threshold = 50
-        value_threshold = 50
+        saturation_threshold = 0.5
+        value_threshold = 0.4
 
         lhsv = rgb_to_hsv(*self._l_rgb)
         rhsv = rgb_to_hsv(*self._r_rgb)
@@ -300,31 +300,35 @@ class AdvancedBot:
         self.tank.stop()
 
         if clockwise:
-            pass
+            self.steering_drive.on_for_seconds(100, SpeedPercent(10), FULL_TURN_TIME/4)
         else:
-            pass
+            self.steering_drive.on_for_seconds(-100, SpeedPercent(10), FULL_TURN_TIME/4)
     
     def _turn_to_the_point(self):
         # Additional offset move forwards (to be calculated on labolatories)
-        # time_forward = None
-        # self.tank.on_for_seconds(SpeedPercent(10), SpeedPercent(10), time_forward, brake=True)
+        self.tank.stop()
+        time_forward = 0.4
+        self.tank.on_for_seconds(SpeedPercent(10), SpeedPercent(10), time_forward, brake=True)
 
         if self._turn_direction == TurnDirection.RIGHT:
             self._turn_by_angle(clockwise=True, angle=90)
         else:
-            self._turn_by_angle(clockwise=True, angle=90)
+            self._turn_by_angle(clockwise=False, angle=90)
 
-        pick_up_point_forward_time = 5
-        self.tank.on_for_seconds(SpeedPercent(10), SpeedPercent(10), pick_up_point_forward_time, brake=True)
+        #pick_up_point_forward_time = 4
+        #self.tank.on_for_seconds(SpeedPercent(10), SpeedPercent(10), pick_up_point_forward_time, brake=True)
+
+        self.run_simple_follower(3, 1.2, 0, 0.2, 12)
+        print("Simple following ended")
+
     
     def _probe_one_path(self, max_probing_time):
-        self._medium_motor.on_for_degrees(SpeedPercent(10), -30)
-        start_time = time.time()
+        start_time = time()
         self.tank.on(SpeedPercent(3), SpeedPercent(3))
         found = False
-        while time.time() - start_time < max_probing_time:
+        while time() - start_time < max_probing_time:
             if self._touch_sensor.is_pressed:
-                elapsed_time = time.time() - start_time
+                elapsed_time = time() - start_time
                 self.tank.off()
                 found = True
             else:
@@ -333,30 +337,45 @@ class AdvancedBot:
         return found, elapsed_time
     
     def _probe(self, max_probing_time):
-        self.steering_drive.on_for_seconds(100, SpeedPercent(10), FULL_TURN_TIME/12)
+        self.steering_drive.on_for_seconds(100, SpeedPercent(10), FULL_TURN_TIME/18)
+        self._medium_motor.on_for_degrees(SpeedPercent(10), -20)
         while True:
             for angle in [-1,0,1]:
                 found, elapsed_time = self._probe_one_path(max_probing_time)
                 if found:
                     return elapsed_time, angle
                 self.tank.on_for_seconds(SpeedPercent(-3), SpeedPercent(-3), elapsed_time)
-                self.steering_drive.on_for_seconds(-100, SpeedPercent(10), FULL_TURN_TIME/12)
+                self.steering_drive.on_for_seconds(-100, SpeedPercent(10), FULL_TURN_TIME/18)
             self.steering_drive.on_for_seconds(100, SpeedPercent(10), FULL_TURN_TIME/6)
 
-    def _return_to_the_line(self, elapsed_time, angle):
-        self.tank.on_for_seconds(SpeedPercent(-10), SpeedPercent(-10), elapsed_time)
-        if angle == -1:
-            self.steering_drive.on_for_seconds(-100, SpeedPercent(10), FULL_TURN_TIME/12)
-        elif angle == 1:
-            self.steering_drive.on_for_seconds(100, SpeedPercent(10), FULL_TURN_TIME/12)
+    def _return_to_the_line(self, elapsed_time, angle, pick_up_point_forward_time):
+        self.tank.on_for_seconds(SpeedPercent(-3), SpeedPercent(-3), elapsed_time)
+        if self._loaded:
+            if angle == -1:
+                self.steering_drive.on_for_seconds(-100, SpeedPercent(10), FULL_TURN_TIME/18)
+            elif angle == 1:
+                self.steering_drive.on_for_seconds(100, SpeedPercent(10), FULL_TURN_TIME/18)
+
         self.steering_drive.on_for_seconds(100, SpeedPercent(10), FULL_TURN_TIME/2)
-    
+
+        print("Returning to the line currently")
+        self.tank.on_for_seconds(SpeedPercent(10), SpeedPercent(10), pick_up_point_forward_time, brake=True)
+
+        if self._turn_direction == TurnDirection.RIGHT:
+            self._turn_by_angle(clockwise=True, angle=75)
+        else:
+            self._turn_by_angle(clockwise=False, angle=75)
+        print("Next following")
+
+        pick_up_point_forward_time = 1
+        self.tank.on_for_seconds(SpeedPercent(10), SpeedPercent(10), pick_up_point_forward_time, brake=True)
+
     def _load_the_package(self):
-        self._medium_motor.on_for_degrees(SpeedPercent(10), -90)
+        self._medium_motor.on_for_degrees(SpeedPercent(10), -80)
         self._loaded = True
     
     def _unload_the_package(self):
-        self._medium_motor.on_for_degrees(SpeedPercent(10), 90)
+        self._medium_motor.on_for_degrees(SpeedPercent(10), 80)
         self._loaded = False
 
     def follow_line_step(self, l_tol: float, r_tol: float):
@@ -394,8 +413,6 @@ class AdvancedBot:
 
             self.update_colors()
 
-            if self._r_color == Colors.GREEN:
-                break
             self.calculate_grayscale()
 
             self.follow_line_step(l_cs_tol, r_cs_tol)
@@ -403,34 +420,40 @@ class AdvancedBot:
 
             end_time = time()
 
-        self.tank.on_for_seconds(SpeedPercent(10), SpeedPercent(-10), 1.36)
         self.tank.stop()
         print("Following ended!")
 
-    def run_loader_job(self, colors):
+    def run_loader_job(self, custom_colors):
             # Set parameters to default values
-            self._pid.set_pid_coefficients(*self._default_pid_parameters)
-            self._follow_speed = speed_to_speedvalue(self._default_speed)
+            kp = 1.2
+            ki = 0
+            kd = 0.2
+            speed = 3
+
+            self._pid.set_pid_coefficients(kp, ki, kd)
+            self._follow_speed = speed_to_speedvalue(speed)
             self._speed_native_units = self._follow_speed.to_native_units(
                 self.tank.left_motor)
 
             while self._state != States.TERMINAL:
 
                 # Probe RGB from both sensors and calculate grayscale reading
-                self.update_colors(colors.values())
+                self.update_colors(custom_colors)
                 self.calculate_grayscale()
 
                 if self._state == States.FOLLOW_THE_LINE:
-                    if self._l_color == colors["primary"]:
+                    if self._l_color == custom_colors[0]:
                         self._pick_color = self._l_color
                         self._turn_direction = TurnDirection.LEFT
                         self._state = States.TURN_TO_THE_POINT
+                        print("Turn state")
                         continue
 
-                    elif self._r_color == colors["primary"]:
+                    elif self._r_color == custom_colors[0]:
                         self._pick_color = self._r_color
                         self._turn_direction = TurnDirection.RIGHT
                         self._state = States.TURN_TO_THE_POINT
+                        print("Turn state")
                         continue
 
                     else:
@@ -442,34 +465,41 @@ class AdvancedBot:
 
                     if not self._loaded:
                         self._state = States.PROBE
+                        print("Probe")
                     else:
                         self._state = States.UNLOAD
+                        print("Unload")
 
                 elif self._state == States.PROBE:
-                    elapsed_time, angle = self._probe(2)
+                    elapsed_time, angle = self._probe(6)
 
                     self._state = States.LOAD
+                    print("Load")
 
                 elif self._state == States.LOAD:
                     self._load_the_package()
 
                     self._state = States.RETURN_TO_THE_LINE
+                    print("Return to the line")
 
                 elif self._state == States.RETURN_TO_THE_LINE:
-                    self._return_to_the_line(elapsed_time, angle)
 
                     if self._loaded:
+                        pick_up_forward_time = 2.5
+                        self._return_to_the_line(elapsed_time, angle, pick_up_forward_time)
                         self._state = States.FOLLOW_THE_LINE
+                        print("Follow the line")
                     else:
+                        pick_up_forward_time = 1.5
+                        self._return_to_the_line(elapsed_time, angle, pick_up_forward_time)
                         self._state = States.TERMINAL
+                        print("Terminal")
 
                 elif self._state == States.UNLOAD:
                     self._unload_the_package()
 
                     self._state = States.RETURN_TO_THE_LINE
+                    print("Return to the line")
 
                 # Cool down for 5ms / If not necessary remove (very probable)
                 sleep(0.005)
-
-
-

@@ -4,17 +4,6 @@ from ev3dev2.sensor.lego import ColorSensor
 from ev3dev2.sensor import INPUT_1, INPUT_2
 from ev3dev2.motor import LineFollowErrorTooFast
 
-"""
-General information:
-Motors
-    - LEFT MOTOR - OUTPUT_C
-    - RIGHT MOTOR - OUTPUT_A
-Sensors
-    - Left Color Sensor - ?
-    - Right Color Sensor - ?
-
-"""
-
 
 class PID:
     def __init__(self, kp: float, ki: float, kd: float,
@@ -35,7 +24,7 @@ class PID:
         self._integral_counter = 0
         self._integral_reset_count = integral_reset_count
 
-    def calculate_pid_steering(self, error):
+    def calculate_pid_steering(self, error: float):
         # Calculate proportional, integral and derivative parts
         self._integral += error
         self._derivative = error - self._last_error
@@ -66,7 +55,7 @@ class PID:
         return self._steering
 
 
-class LineFollower2:
+class LineFollower:
     def __init__(self, left_motor: str, right_motor: str, left_sensor: str,
                  right_sensor: str, pid_controller: PID,
                  left_motor_polarity_inversed=False,
@@ -114,53 +103,6 @@ class LineFollower2:
         return error
 
     def follow_line_for_time(self, speed, follow_time, sleep_time=0.01,
-                             l_cs_tol=1., r_cs_tol=1.):
-        speed = speed_to_speedvalue(speed)
-        speed_native_units = speed.to_native_units(self.tank.left_motor)
-
-        start_time = end_time = time.time()
-
-        if self._display_logs:
-            print("Following started!")
-
-        # Optional sensor calibration
-        # self._right_color_sensor.calibrate_white()
-        # self._left_color_sensor.calibrate_white()
-
-        while end_time - start_time <= follow_time:
-            error = self._generate_error(l_cs_tol=l_cs_tol,
-                                         r_cs_tol=r_cs_tol)
-            turn_native_units = self._pid.calculate_pid_steering(error)
-            log_message = ""
-
-            log_message += "Left: " + str(self._reflected_light_percentage["left"]) + " " + "Right: " + str(self._reflected_light_percentage["right"]) + "\t"
-            log_message += "Turn: " + str(turn_native_units) + "\t"
-
-            # Calculate motors speed
-            left_speed = SpeedNativeUnits(speed_native_units + turn_native_units)
-            right_speed = SpeedNativeUnits(speed_native_units - turn_native_units)
-
-            log_message += "LSpeed: " + str(left_speed) + " "
-            log_message += "RSpeed: " + str(right_speed)
-
-            if sleep_time:
-                time.sleep(sleep_time)
-
-            try:
-                self.tank.on(left_speed, right_speed)
-            except SpeedInvalid as e:
-                self.tank.stop()
-                raise LineFollowErrorTooFast("The robot is moving too fast to follow the line")
-
-            end_time = time.time()
-            print(log_message)
-
-        self.tank.stop()
-
-        if self._display_logs:
-            print("Following ended!")
-
-    def follow_line_for_time_raw(self, speed, follow_time, sleep_time=0.01,
                                  l_cs_tol=1., r_cs_tol=1.):
         speed = speed_to_speedvalue(speed)
         speed_native_units = speed.to_native_units(self.tank.left_motor)
@@ -169,10 +111,6 @@ class LineFollower2:
 
         if self._display_logs:
             print("Following started!")
-
-        # Optional sensor calibration
-        # self._right_color_sensor.calibrate_white()
-        # self._left_color_sensor.calibrate_white()
 
         while end_time - start_time <= follow_time:
             error = self._generate_error(l_cs_tol=l_cs_tol,
@@ -202,20 +140,11 @@ class LineFollower2:
 
 if __name__ == "__main__":
     regulator = PID(kp=3.8, ki=0, kd=0.2, integral_reset_count=5)
-    follower = LineFollower2(OUTPUT_C, OUTPUT_B, INPUT_2, INPUT_1, regulator,
+    follower = LineFollower(OUTPUT_C, OUTPUT_B, INPUT_2, INPUT_1, regulator,
                              False, False)
 
     try:
-        follower.follow_line_for_time_raw(speed=10, follow_time=120, sleep_time=0.001,
+        follower.follow_line_for_time(speed=10, follow_time=120, sleep_time=0.001,
                                           l_cs_tol=1, r_cs_tol=0.9)
     except KeyboardInterrupt:
         follower.tank.stop()
-
-
-"""
-test 1:
-kp=4, ki=0, kd=0, integral_reset_count=5, speed=10, follow_time=120, sleep_time=0.001, l_cs_tol=1, r_cs_tol=0.9
-
-test 2: 
-kp=3.8, ki=0, kd=0.2, integral_reset_count=5, speed=10, follow_time=120, sleep_time=0.001, l_cs_tol=1, r_cs_tol=0.9
-"""

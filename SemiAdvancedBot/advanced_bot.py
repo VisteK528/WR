@@ -1,10 +1,9 @@
-from ev3dev2.motor import MoveTank, speed_to_speedvalue, SpeedInvalid, SpeedNativeUnits, MediumMotor, SpeedPercent
+from ev3dev2.motor import MoveTank, speed_to_speedvalue, SpeedInvalid, \
+    SpeedNativeUnits, MediumMotor, SpeedPercent, MoveSteering
 from ev3dev2.sensor.lego import ColorSensor, TouchSensor
 from ev3dev2.motor import LineFollowErrorTooFast
 from pid import PID
 from time import sleep, time
-from my_utils import my_map, States, TurnDirection, Colors
-from ev3dev2.button import Button
 
 """
 States:
@@ -16,6 +15,37 @@ S5 Return back to the line
 S6 Unload the package
 S7 Terminal State
 """
+
+
+class States:
+    FOLLOW_THE_LINE = 0
+    TURN_TO_THE_POINT = 1
+    PROBE = 2
+    LOAD = 3
+    RETURN_TO_THE_LINE = 4
+    UNLOAD = 5
+    TERMINAL = 6
+
+
+class Colors:
+    WHITE = 0
+    BLACK = 1
+    GREEN = 2
+    YELLOW = 3
+    RED = 4
+    BLUE = 5
+    UNKNOWN = 6
+
+
+class TurnDirection:
+    LEFT = 0
+    RIGHT = 1
+
+
+def my_map(x, in_min, in_max, out_min, out_max):
+    scaled_value = ((x - in_min) * (out_max - out_min) / (in_max - in_min) +
+                    out_min)
+    return scaled_value
 
 
 def rgb_to_hsv(r: int, g: int, b: int):
@@ -50,7 +80,8 @@ def rgb_to_hsv(r: int, g: int, b: int):
 
 
 class AdvancedBot:
-    def __init__(self, left_motor: str, right_motor: str, medium_motor: str, left_sensor: str,
+    def __init__(self, left_motor: str, right_motor: str, medium_motor: str,
+                 left_sensor: str,
                  right_sensor: str, touch_sensor: str, pid_controller: PID,
                  left_motor_polarity_inversed=False,
                  right_motor_polarity_inversed=False):
@@ -63,10 +94,18 @@ class AdvancedBot:
 
         self._pid = pid_controller
 
+        # Constant variables
+        self._full_turn_time = 5.445  # in seconds
+        self._saturation_threshold = 0.5
+        self._value_threshold = 0.4
+        self._convert_to_grayscale_coefficients = [0.30, 0.59, 0.11]
+
         # Init tank unit
         self.tank = MoveTank(left_motor_port=left_motor,
                              right_motor_port=right_motor)
 
+        self.steering_drive = MoveSteering(left_motor_port=left_motor,
+                                           right_motor_port=right_motor)
         # Polarity
         if left_motor_polarity_inversed:
             self.tank.left_motor.polarity = "inversed"
@@ -100,8 +139,8 @@ class AdvancedBot:
         self._touch_sensor = TouchSensor(touch_sensor)
 
         # ==================== Parameters =====================
-        self._default_pid_parameters = (3.8, 0.0, 0.2)
-        self._default_speed = 10
+        self._default_pid_parameters = (1.2, 0.0, 0.2)
+        self._default_speed = 3
 
         self._follow_speed = speed_to_speedvalue(self._default_speed)
         self._speed_native_units = self._follow_speed.to_native_units(
@@ -111,7 +150,7 @@ class AdvancedBot:
 
         self._l_cs.calibrate_white()
         self._r_cs.calibrate_white()
-        
+
         self._max_l_cs = [self._l_cs.red_max, self._l_cs.green_max,
                           self._l_cs.blue_max]
 
@@ -129,10 +168,10 @@ class AdvancedBot:
         raw_right = [self._r_cs.value(i) for i in range(3)]
 
         self._l_rgb = [min(int((color * 255) / max_color), 255) for color,
-                       max_color in zip(raw_left, self._max_l_cs)]
+        max_color in zip(raw_left, self._max_l_cs)]
 
         self._r_rgb = [min(int((color * 255) / max_color), 255) for color,
-                       max_color in zip(raw_right, self._max_r_cs)]
+        max_color in zip(raw_right, self._max_r_cs)]
 
         # 4 colors to be checked Red, Green, Yellow, Blue
 
@@ -150,9 +189,6 @@ class AdvancedBot:
         # Red       ->  (232,  44,  32)
         # Blue      ->  ( 48, 102, 164)
 
-        saturation_threshold = 50
-        value_threshold = 50
-
         lhsv = rgb_to_hsv(*self._l_rgb)
         rhsv = rgb_to_hsv(*self._r_rgb)
 
@@ -161,8 +197,10 @@ class AdvancedBot:
 
         # Check if there are any special colors to be checked
         if special_colors:
-            if special_colors[0] in [Colors.RED, Colors.GREEN] and special_colors[1] in [Colors.RED, Colors.GREEN]:
-                if lhsv[1] >= saturation_threshold and lhsv[2] >= value_threshold:
+            if special_colors[0] in [Colors.RED, Colors.GREEN] and \
+                    special_colors[1] in [Colors.RED, Colors.GREEN]:
+                if lhsv[1] >= self._saturation_threshold and lhsv[
+                    2] >= self._value_threshold:
                     # Check RED
                     if (0 <= lhsv[0] <= 26) or (282 <= lhsv[0] <= 359):
                         self._l_color = Colors.RED
@@ -171,7 +209,8 @@ class AdvancedBot:
                     if 70 <= lhsv[0] <= 172:
                         self._l_color = Colors.GREEN
 
-                if rhsv[1] >= saturation_threshold and rhsv[2] >= value_threshold:
+                if rhsv[1] >= self._saturation_threshold and rhsv[
+                    2] >= self._value_threshold:
                     # Check RED
                     if (0 <= rhsv[0] <= 26) or (282 <= rhsv[0] <= 359):
                         self._r_color = Colors.RED
@@ -180,8 +219,10 @@ class AdvancedBot:
                     if 70 <= rhsv[0] <= 172:
                         self._r_color = Colors.GREEN
 
-            elif special_colors[0] in [Colors.RED, Colors.YELLOW] and special_colors[1] in [Colors.RED, Colors.YELLOW]:
-                if lhsv[1] >= saturation_threshold and lhsv[2] >= value_threshold:
+            elif special_colors[0] in [Colors.RED, Colors.YELLOW] and \
+                    special_colors[1] in [Colors.RED, Colors.YELLOW]:
+                if lhsv[1] >= self._saturation_threshold and lhsv[
+                    2] >= self._value_threshold:
                     # Check RED
                     if (0 <= lhsv[0] <= 26) or (282 <= lhsv[0] <= 359):
                         self._l_color = Colors.RED
@@ -190,7 +231,8 @@ class AdvancedBot:
                     if 30 <= lhsv[0] <= 80:
                         self._l_color = Colors.YELLOW
 
-                if rhsv[1] >= saturation_threshold and rhsv[2] >= value_threshold:
+                if rhsv[1] >= self._saturation_threshold and rhsv[
+                    2] >= self._value_threshold:
                     # Check RED
                     if (0 <= rhsv[0] <= 26) or (282 <= rhsv[0] <= 359):
                         self._r_color = Colors.RED
@@ -199,8 +241,10 @@ class AdvancedBot:
                     if 30 <= rhsv[0] <= 80:
                         self._r_color = Colors.YELLOW
 
-            elif special_colors[0] in [Colors.RED, Colors.BLUE] and special_colors[1] in [Colors.RED, Colors.BLUE]:
-                if lhsv[1] >= saturation_threshold and lhsv[2] >= value_threshold:
+            elif special_colors[0] in [Colors.RED, Colors.BLUE] and \
+                    special_colors[1] in [Colors.RED, Colors.BLUE]:
+                if lhsv[1] >= self._saturation_threshold and lhsv[
+                    2] >= self._value_threshold:
                     # Check RED
                     if (0 <= lhsv[0] <= 40) or (282 <= lhsv[0] <= 359):
                         self._l_color = Colors.RED
@@ -209,7 +253,8 @@ class AdvancedBot:
                     if 160 <= lhsv[0] <= 260:
                         self._l_color = Colors.BLUE
 
-                if rhsv[1] >= saturation_threshold and rhsv[2] >= value_threshold:
+                if rhsv[1] >= self._saturation_threshold and rhsv[
+                    2] >= self._value_threshold:
                     # Check RED
                     if (0 <= rhsv[0] <= 40) or (282 <= rhsv[0] <= 359):
                         self._r_color = Colors.RED
@@ -218,8 +263,10 @@ class AdvancedBot:
                     if 160 <= rhsv[0] <= 260:
                         self._r_color = Colors.BLUE
 
-            elif special_colors[0] in [Colors.GREEN, Colors.YELLOW] and special_colors[1] in [Colors.GREEN, Colors.YELLOW]:
-                if lhsv[1] >= saturation_threshold and lhsv[2] >= value_threshold:
+            elif special_colors[0] in [Colors.GREEN, Colors.YELLOW] and \
+                    special_colors[1] in [Colors.GREEN, Colors.YELLOW]:
+                if lhsv[1] >= self._saturation_threshold and lhsv[
+                    2] >= self._value_threshold:
                     # Check GREEN
                     if 70 <= lhsv[0] <= 172:
                         self._l_color = Colors.GREEN
@@ -228,7 +275,8 @@ class AdvancedBot:
                     if 35 <= lhsv[0] <= 69:
                         self._l_color = Colors.YELLOW
 
-                if rhsv[1] >= saturation_threshold and rhsv[2] >= value_threshold:
+                if rhsv[1] >= self._saturation_threshold and rhsv[
+                    2] >= self._value_threshold:
                     # Check GREEN
                     if 70 <= rhsv[0] <= 172:
                         self._r_color = Colors.GREEN
@@ -237,8 +285,10 @@ class AdvancedBot:
                     if 35 <= rhsv[0] <= 69:
                         self._r_color = Colors.YELLOW
 
-            elif special_colors[0] in [Colors.GREEN, Colors.BLUE] and special_colors[1] in [Colors.GREEN, Colors.BLUE]:
-                if lhsv[1] >= saturation_threshold and lhsv[2] >= value_threshold:
+            elif special_colors[0] in [Colors.GREEN, Colors.BLUE] and \
+                    special_colors[1] in [Colors.GREEN, Colors.BLUE]:
+                if lhsv[1] >= self._saturation_threshold and lhsv[
+                    2] >= self._value_threshold:
                     # Check GREEN
                     if 70 <= lhsv[0] <= 155:
                         self._l_color = Colors.GREEN
@@ -247,7 +297,8 @@ class AdvancedBot:
                     if 160 <= lhsv[0] <= 260:
                         self._l_color = Colors.BLUE
 
-                if rhsv[1] >= saturation_threshold and rhsv[2] >= value_threshold:
+                if rhsv[1] >= self._saturation_threshold and rhsv[
+                    2] >= self._value_threshold:
                     # Check GREEN
                     if 70 <= lhsv[0] <= 155:
                         self._l_color = Colors.GREEN
@@ -256,8 +307,10 @@ class AdvancedBot:
                     if 160 <= rhsv[0] <= 260:
                         self._r_color = Colors.BLUE
 
-            elif special_colors[0] in [Colors.YELLOW, Colors.BLUE] and special_colors[1] in [Colors.YELLOW, Colors.BLUE]:
-                if lhsv[1] >= saturation_threshold and lhsv[2] >= value_threshold:
+            elif special_colors[0] in [Colors.YELLOW, Colors.BLUE] and \
+                    special_colors[1] in [Colors.YELLOW, Colors.BLUE]:
+                if lhsv[1] >= self._saturation_threshold and lhsv[
+                    2] >= self._value_threshold:
                     # Check YELLOW
                     if 35 <= lhsv[0] <= 69:
                         self._l_color = Colors.YELLOW
@@ -266,7 +319,8 @@ class AdvancedBot:
                     if 160 <= lhsv[0] <= 260:
                         self._l_color = Colors.BLUE
 
-                if rhsv[1] >= saturation_threshold and rhsv[2] >= value_threshold:
+                if rhsv[1] >= self._saturation_threshold and rhsv[
+                    2] >= self._value_threshold:
                     # Check YELLOW
                     if 35 <= rhsv[0] <= 69:
                         self._r_color = Colors.YELLOW
@@ -276,17 +330,19 @@ class AdvancedBot:
                         self._r_color = Colors.BLUE
 
     def calculate_grayscale(self):
-        coefficients = [0.30, 0.59, 0.11]
-
         self._l_grayscale = sum([coeff * canal for coeff, canal in zip(
-            coefficients, self._l_rgb)])
+            self._convert_to_grayscale_coefficients, self._l_rgb)])
         self._r_grayscale = sum([coeff * canal for coeff, canal in zip(
-            coefficients, self._r_rgb)])
+            self._convert_to_grayscale_coefficients, self._r_rgb)])
 
         self._l_grayscale = my_map(self._l_grayscale, 0, 255, 0, 100)
         self._r_grayscale = my_map(self._r_grayscale, 0, 255, 0, 100)
 
-    def _turn_by_angle(self, clockwise: bool, angle: float):
+    def _angle_to_seconds(self, angle: float):
+        return self._full_turn_time * angle / 360
+
+    def _turn_by_angle(self, clockwise: bool, speed_percent: float,
+                       angle: float):
         """
         :param clockwise: Direction of the turn, either clockwise (to the right)
          or counter-clockwise (to the left)
@@ -296,37 +352,94 @@ class AdvancedBot:
         self.tank.stop()
 
         if clockwise:
-            pass
+            self.steering_drive.on_for_seconds(100,
+                                               SpeedPercent(speed_percent),
+                                               self._angle_to_seconds(angle))
         else:
-            pass
-    
+            self.steering_drive.on_for_seconds(-100,
+                                               SpeedPercent(speed_percent),
+                                               self._angle_to_seconds(angle))
+
     def _turn_to_the_point(self):
-        # Additional offset move forwards (to be calculated on labolatories)
-        # time_forward = None
-        # self.tank.on_for_seconds(SpeedPercent(10), SpeedPercent(10), time_forward, brake=True)
+        # Additional offset move forwards
+        self.tank.stop()
+        time_forward = 0.4
+        self.tank.on_for_seconds(SpeedPercent(10), SpeedPercent(10),
+                                 time_forward, brake=True)
 
         if self._turn_direction == TurnDirection.RIGHT:
-            self._turn_by_angle(clockwise=True, angle=90)
+            self._turn_by_angle(clockwise=True, speed_percent=10, angle=90)
         else:
-            self._turn_by_angle(clockwise=True, angle=90)
+            self._turn_by_angle(clockwise=False, speed_percent=10, angle=90)
 
-        pick_up_point_forward_time = 5
-        self.tank.on_for_seconds(SpeedPercent(10), SpeedPercent(10), pick_up_point_forward_time, brake=True)
-    
-    def _probe(self):
-        pass
-    
-    def _return_to_the_line(self):
-        pass
-    
+        self.run_simple_follower(3, 1.2, 0, 0.2, 12)
+
+    def _probe_one_path(self, max_probing_time):
+        start_time = time()
+        self.tank.on(SpeedPercent(3), SpeedPercent(3))
+        found = False
+        while time() - start_time < max_probing_time:
+            if self._touch_sensor.is_pressed:
+                elapsed_time = time() - start_time
+                self.tank.off()
+                found = True
+            else:
+                elapsed_time = max_probing_time
+        self.tank.off()
+        return found, elapsed_time
+
+    def _probe(self, max_probing_time):
+        self._turn_by_angle(clockwise=True, speed_percent=10, angle=20)
+        self._medium_motor.on_for_degrees(SpeedPercent(10), -20)
+        while True:
+            for angle in [-1, 0, 1]:
+                found, elapsed_time = self._probe_one_path(max_probing_time)
+                if found:
+                    return elapsed_time, angle
+                self.tank.on_for_seconds(SpeedPercent(-3), SpeedPercent(-3),
+                                         elapsed_time)
+                self._turn_by_angle(clockwise=False, speed_percent=10, angle=20)
+            self._turn_by_angle(clockwise=True, speed_percent=10, angle=60)
+
+    def _return_to_the_line(self, elapsed_time, angle,
+                            pick_up_point_forward_time):
+        # Go back for elapsed time
+        self.tank.on_for_seconds(SpeedPercent(-3), SpeedPercent(-3),
+                                 elapsed_time)
+
+        # Center robot on the line
+        if self._loaded:
+            if angle == -1:
+                self._turn_by_angle(clockwise=False, speed_percent=10, angle=20)
+            elif angle == 1:
+                self._turn_by_angle(clockwise=True, speed_percent=10, angle=20)
+
+        # Rotate the robot frontally to the line
+        self._turn_by_angle(clockwise=True, speed_percent=10, angle=180)
+
+        # Go back for pick_up_forward_time
+        self.tank.on_for_seconds(SpeedPercent(10), SpeedPercent(10),
+                                 pick_up_point_forward_time, brake=True)
+
+        # Turn to the direction consistent to the pickup point turn direction
+        if self._turn_direction == TurnDirection.RIGHT:
+            self._turn_by_angle(clockwise=True, speed_percent=10, angle=75)
+        else:
+            self._turn_by_angle(clockwise=False, speed_percent=10, angle=75)
+
+        # Move further a little bit from the turn color area
+        self.tank.on_for_seconds(SpeedPercent(10), SpeedPercent(10), 1,
+                                 brake=True)
+
     def _load_the_package(self):
-        pass
-    
+        self._medium_motor.on_for_degrees(SpeedPercent(10), -80)
+        self._loaded = True
+
     def _unload_the_package(self):
-        pass
+        self._medium_motor.on_for_degrees(SpeedPercent(10), 80)
+        self._loaded = False
 
     def follow_line_step(self, l_tol: float, r_tol: float):
-
         # Compute error for PID
         error = self._l_grayscale * l_tol - self._r_grayscale * r_tol
 
@@ -354,14 +467,10 @@ class AdvancedBot:
         self._speed_native_units = self._follow_speed.to_native_units(
             self.tank.left_motor)
 
-        print("Following started!")
         start_time = end_time = time()
         while end_time - start_time <= follow_time:
-
             self.update_colors()
 
-            if self._r_color == Colors.GREEN:
-                break
             self.calculate_grayscale()
 
             self.follow_line_step(l_cs_tol, r_cs_tol)
@@ -369,74 +478,79 @@ class AdvancedBot:
 
             end_time = time()
 
-        self.tank.on_for_seconds(SpeedPercent(10), SpeedPercent(-10), 1.36)
         self.tank.stop()
-        print("Following ended!")
 
-    def run_loader_job(self, colors):
-            # Set parameters to default values
-            self._pid.set_pid_coefficients(*self._default_pid_parameters)
-            self._follow_speed = speed_to_speedvalue(self._default_speed)
-            self._speed_native_units = self._follow_speed.to_native_units(
-                self.tank.left_motor)
+    def run_loader_job(self, custom_colors):
+        self._pid.set_pid_coefficients(*self._default_pid_parameters)
+        self._follow_speed = speed_to_speedvalue(self._default_speed)
+        self._speed_native_units = self._follow_speed.to_native_units(
+            self.tank.left_motor)
 
-            while self._state != States.TERMINAL:
+        while self._state != States.TERMINAL:
 
-                # Probe RGB from both sensors and calculate grayscale reading
-                self.update_colors(colors.values())
-                self.calculate_grayscale()
+            # Probe RGB from both sensors and calculate grayscale reading
+            self.update_colors(custom_colors)
+            self.calculate_grayscale()
 
-                if self._state == States.FOLLOW_THE_LINE:
-                    if self._l_color == colors["primary"]:
-                        self._pick_color = self._l_color
-                        self._turn_direction = TurnDirection.LEFT
-                        self._state = States.TURN_TO_THE_POINT
-                        continue
+            if self._state == States.FOLLOW_THE_LINE:
+                if self._l_color == custom_colors[0]:
+                    self._pick_color = self._l_color
+                    self._turn_direction = TurnDirection.LEFT
+                    self._state = States.TURN_TO_THE_POINT
+                    print("Turn state")
+                    continue
 
-                    elif self._r_color == colors["primary"]:
-                        self._pick_color = self._r_color
-                        self._turn_direction = TurnDirection.RIGHT
-                        self._state = States.TURN_TO_THE_POINT
-                        continue
+                elif self._r_color == custom_colors[0]:
+                    self._pick_color = self._r_color
+                    self._turn_direction = TurnDirection.RIGHT
+                    self._state = States.TURN_TO_THE_POINT
+                    print("Turn state")
+                    continue
 
-                    else:
-                        self._state = States.FOLLOW_THE_LINE
-                        self.follow_line_step(l_tol=1, r_tol=1)
+                else:
+                    self._state = States.FOLLOW_THE_LINE
+                    self.follow_line_step(l_tol=1, r_tol=1)
 
-                elif self._state == States.TURN_TO_THE_POINT:
-                    self._turn_to_the_point()
+            elif self._state == States.TURN_TO_THE_POINT:
+                self._turn_to_the_point()
 
-                    if not self._loaded:
-                        self._state = States.PROBE
-                    else:
-                        self._state = States.UNLOAD
+                if not self._loaded:
+                    self._state = States.PROBE
+                    print("Probe")
+                else:
+                    self._state = States.UNLOAD
+                    print("Unload")
 
-                elif self._state == States.PROBE:
-                    self._probe()
+            elif self._state == States.PROBE:
+                elapsed_time, angle = self._probe(6)
 
-                    self._state = States.LOAD
+                self._state = States.LOAD
+                print("Load")
 
-                elif self._state == States.LOAD:
-                    self._load_the_package()
+            elif self._state == States.LOAD:
+                self._load_the_package()
 
-                    self._state = States.RETURN_TO_THE_LINE
+                self._state = States.RETURN_TO_THE_LINE
+                print("Return to the line")
 
-                elif self._state == States.RETURN_TO_THE_LINE:
-                    self._return_to_the_line()
+            elif self._state == States.RETURN_TO_THE_LINE:
 
-                    if self._loaded:
-                        self._state = States.FOLLOW_THE_LINE
-                    else:
-                        self._state = States.TERMINAL
+                if self._loaded:
+                    self._return_to_the_line(elapsed_time, angle,
+                                             pick_up_point_forward_time=2.5)
+                    self._state = States.FOLLOW_THE_LINE
+                    print("Follow the line")
+                else:
+                    self._return_to_the_line(elapsed_time, angle,
+                                             pick_up_point_forward_time=1.5)
+                    self._state = States.TERMINAL
+                    print("Terminal")
 
-                elif self._state == States.UNLOAD:
-                    self._unload_the_package()
+            elif self._state == States.UNLOAD:
+                self._unload_the_package()
 
-                    self._state = States.RETURN_TO_THE_LINE
+                self._state = States.RETURN_TO_THE_LINE
+                print("Return to the line")
 
-                # Cool down for 5ms / If not necessary remove (very probable)
-                sleep(0.005)
-
-
-
-
+            # Cool down for 5ms
+            sleep(0.005)
